@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Plot of Net Gain Function f(p)</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+        h1 {
+            color: #1c1e21;
+        }
+        #plot-container {
+            width: 100%;
+            max-width: 900px;
+            margin-bottom: 20px;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            width: 100%;
+            max-width: 900px;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .control-group label {
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        .control-group input[type="range"] {
+            width: 100%;
+        }
+        .control-group span {
+            font-weight: bold;
+            color: #007bff;
+        }
+        .description {
+            width: 100%;
+            max-width: 900px;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-top: 20px;
+            font-size: 0.9em;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>General Interactive Plot of Net Gain Function f(p). <br> \(f(p) = a \cdot \mathbb{E}[g(1,0) - g(0,0)] - \left(1 - \frac{k \cdot z}{N-k}\right)\)</h1>
+
+
+    <div id="plot-container"></div>
+
+    <div class="controls">
+        <div class="control-group">
+            <label for="N-slider">N (Population): <span id="N-value">10</span></label>
+            <input type="range" id="N-slider" min="2" max="50" value="10">
+        </div>
+        <div class="control-group">
+            <label for="k-slider">k (Audits): <span id="k-value">3</span></label>
+            <input type="range" id="k-slider" min="1" max="9" value="3">
+        </div>
+        <div class="control-group">
+            <label for="a-slider">a (Public Good Value): <span id="a-value">0.50</span></label>
+            <input type="range" id="a-slider" min="0" max="1" step="0.01" value="0.5">
+        </div>
+        <div class="control-group">
+            <label for="z-slider">z (Penalty): <span id="z-value">1.50</span></label>
+            <input type="range" id="z-slider" min="0" max="10" step="0.01" value="1.5">
+        </div>
+    </div>
+
+    <div class="description">
+        <p>This plot shows the <strong>Net Gain from Contributing, f(p)</strong>, for the decisive unaudited citizen. An equilibrium occurs where the function crosses the x-axis (f(p)=0) or jumps over it.</p>
+        <ul>
+            <li><strong>f(p) > 0:</strong> Citizens are incentivized to contribute more (increase p).</li>
+            <li><strong>f(p) < 0:</strong> Citizens are incentivized to shirk more (decrease p).</li>
+            <li>A <strong>stable equilibrium</strong> is where the function crosses the x-axis from above to below.</li>
+        </ul>
+        <p>The vertical red lines mark "kinks" or discontinuities, which occur when the expected fund threshold, &tau;(p), crosses an integer value.</p>
+    </div>
+
+    <script>
+        // --- Caching for Memoization ---
+        const memo = {};
+
+        function combinations(n, k) {
+            const key = `comb-${n}-${k}`;
+            if (memo[key] !== undefined) return memo[key];
+            if (k < 0 || k > n) return 0;
+            if (k === 0 || k === n) return 1;
+            if (k > n / 2) k = n - k;
+            let res = 1;
+            for (let i = 1; i <= k; i++) {
+                res = res * (n - i + 1) / i;
+            }
+            memo[key] = res;
+            return res;
+        }
+
+        function hypergeometricPMF(k_success_sample, N_pop, K_success_pop, n_sample) {
+            const key = `hyper-${k_success_sample}-${N_pop}-${K_success_pop}-${n_sample}`;
+            if (memo[key] !== undefined) return memo[key];
+            const num = combinations(K_success_pop, k_success_sample) * combinations(N_pop - K_success_pop, n_sample - k_success_sample);
+            const den = combinations(N_pop, n_sample);
+            const res = den > 0 ? num / den : 0;
+            memo[key] = res;
+            return res;
+        }
+        
+        function hypergeometricCDF(x, N_pop, K_success_pop, n_sample) {
+            const key = `hyperCDF-${x}-${N_pop}-${K_success_pop}-${n_sample}`;
+            if (memo[key] !== undefined) return memo[key];
+            let cdf = 0;
+            for (let i = Math.max(0, x); i <= Math.min(n_sample, K_success_pop); i++) {
+                cdf += hypergeometricPMF(i, N_pop, K_success_pop, n_sample);
+            }
+            memo[key] = cdf;
+            return cdf;
+        }
+
+        function binomialPMF(k_success, n_trials, p_prob) {
+             const key = `binom-${k_success}-${n_trials}-${p_prob}`;
+            if (memo[key] !== undefined) return memo[key];
+            if (p_prob <= 1e-9) return k_success === 0 ? 1 : 0;
+            if (p_prob >= 1-1e-9) return k_success === n_trials ? 1 : 0;
+            const res = combinations(n_trials, k_success) * Math.pow(p_prob, k_success) * Math.pow(1 - p_prob, n_trials - k_success);
+            memo[key] = res;
+            return res;
+        }
+
+        // --- Core Calculation Function (Generalized) ---
+        function calculateF(p, N, k, a, z) {
+            // *** FIX: Handle boundary cases explicitly for speed and numerical stability ***
+            if (p <= 1e-9) {
+                return a * k - (1 - (k * z) / (N - k));
+            }
+            if (p >= 1 - 1e-9) {
+                return a * N - (1 - (k * z) / (N - k));
+            }
+
+            const tau_p = k + p * (N - k);
+            const m_threshold = Math.ceil(tau_p);
+
+            let pi_1 = 0; // P(X >= m | t_i=1, omega_i=0)
+            let pi_0 = 0; // P(X >= m | t_i=0, omega_i=0)
+
+            for (let c = 0; c <= N - 1; c++) {
+                const prob_c = binomialPMF(c, N - 1, p);
+                if (prob_c < 1e-12) continue;
+
+                const required_audited_shirkers_1 = m_threshold - 1 - c;
+                pi_1 += prob_c * hypergeometricCDF(required_audited_shirkers_1, N - 1, N - 1 - c, k);
+                
+                const required_audited_shirkers_0 = m_threshold - c;
+                pi_0 += prob_c * hypergeometricCDF(required_audited_shirkers_0, N - 1, N - 1 - c, k);
+            }
+
+            const expected_g_diff = tau_p * (pi_1 - pi_0);
+            const net_private_cost = 1 - (k * z) / (N - k);
+            
+            return a * expected_g_diff - net_private_cost;
+        }
+
+        // --- Plotting Logic ---
+        const plotDiv = document.getElementById('plot-container');
+        const NSlider = document.getElementById('N-slider');
+        const kSlider = document.getElementById('k-slider');
+        const aSlider = document.getElementById('a-slider');
+        const zSlider = document.getElementById('z-slider');
+        const NValue = document.getElementById('N-value');
+        const kValue = document.getElementById('k-value');
+        const aValue = document.getElementById('a-value');
+        const zValue = document.getElementById('z-value');
+
+        function updatePlot() {
+            for (const key in memo) { delete memo[key]; }
+
+            const N = parseInt(NSlider.value);
+            let k = parseInt(kSlider.value);
+            const a = parseFloat(aSlider.value);
+            const z = parseFloat(zSlider.value);
+
+            kSlider.max = N - 1;
+            if (k >= N) {
+                k = N - 1;
+                kSlider.value = k;
+            }
+
+            NValue.textContent = N;
+            kValue.textContent = k;
+            aValue.textContent = a.toFixed(2);
+            zValue.textContent = z.toFixed(2);
+            
+            const discontinuities = [];
+            if (N > k) {
+                for (let m = k + 1; m < N; m++) {
+                    const p_disc = (m - k) / (N - k);
+                    if (p_disc > 0 && p_disc < 1) {
+                        discontinuities.push(p_disc);
+                    }
+                }
+            }
+            
+            const all_points = [0, ...discontinuities.sort((a,b) => a-b), 1];
+            const traces = [];
+            
+            for (let i = 0; i < all_points.length - 1; i++) {
+                const start_p = all_points[i];
+                const end_p = all_points[i+1];
+                const segment_p = [];
+                const segment_f = [];
+                const steps = Math.max(2, Math.ceil((end_p - start_p) * 100));
+
+                for (let j = 0; j <= steps; j++) {
+                    const p = start_p + (j / steps) * (end_p - start_p);
+                    segment_p.push(p);
+                    segment_f.push(calculateF(p, N, k, a, z));
+                }
+                 
+                if (segment_p.length > 0) {
+                    traces.push({
+                        x: segment_p, y: segment_f, mode: 'lines', type: 'scatter',
+                        line: {color: 'royalblue', width: 2.5}, showlegend: false
+                    });
+                }
+            }
+
+            const y_max = Math.max(...traces.flatMap(t => t.y).filter(y => isFinite(y)), 1);
+            const y_min = Math.min(...traces.flatMap(t => t.y).filter(y => isFinite(y)), -1);
+
+            const layout = {
+                xaxis: { title: 'Probability of Contribution (p)', range: [0, 1] },
+                yaxis: { title: 'Net Gain f(p)', zeroline: true, zerolinewidth: 2, zerolinecolor: '#333', range: [Math.min(-1, y_min*1.2), Math.max(1, y_max*1.2)]},
+                showlegend: false,
+                margin: { l: 50, r: 30, b: 50, t: 30 },
+                shapes: discontinuities.map(p_disc => ({
+                    type: 'line', x0: p_disc, y0: -100, x1: p_disc, y1: 100,
+                    line: { color: 'red', width: 1, dash: 'dot' }
+                }))
+            };
+
+            Plotly.react(plotDiv, traces, layout);
+        }
+
+        // --- Event Listeners ---
+        [NSlider, kSlider, aSlider, zSlider].forEach(slider => {
+            slider.addEventListener('input', updatePlot);
+        });
+
+        // Initial Plot
+        updatePlot();
+    </script>
+
+</body>
+</html>
